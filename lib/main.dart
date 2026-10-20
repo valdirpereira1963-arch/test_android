@@ -1768,6 +1768,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
     'Prod. Alternativo',
     'Focal',
     'Nebulização',
+    'Vistoriado',
   ];
 
   final List<Map<String, String>> _grupos = [
