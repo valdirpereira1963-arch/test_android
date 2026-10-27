@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:xml/xml.dart';
 import 'package:flutter_map/flutter_map.dart' as fmap;
 import 'package:latlong2/latlong.dart' as latlng;
+import 'database_helper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,10 +45,12 @@ class _TelaAberturaState extends State<TelaAbertura> {
   List<String> _agentes = [];
   String? _agenteSelecionado;
   List<String> _logradouros = [];
+  List<String> _demandasDisponiveis = [];
   String? _logradouroSelecionado;
   List<String> _quadrasKml = [];
   List<Map<String, String>> _relacaoQuadras = [];
   List<Map<String, dynamic>> _poligonosKml = [];
+  Map<String, Map<String, bool>> _resultadosQuadras = {};
   String? _areaSelecionada;
   String? _scSelecionado;
   String? _quadraSelecionada;
@@ -85,6 +89,7 @@ Map<String, String>? _buscarQuadra(String quadra) {
 @override
 void initState() {
   super.initState();
+  _carregarDadosPersistidos();
 
   _quadraHitNotifier.addListener(() {
     final resultado = _quadraHitNotifier.value;
@@ -115,6 +120,32 @@ void initState() {
   });
 }
 
+
+Future<void> _carregarDadosPersistidos() async {
+  final db = DatabaseHelper.instance;
+  final agentes = await db.carregarLista('agentes');
+  final logradouros = await db.carregarLista('logradouros');
+  final quadras = await db.carregarQuadras();
+  final demandasJson = await db.carregarConfiguracao('demandas_disponiveis');
+  final resultados = await db.carregarResultadosQuadras();
+  List<String> demandas = [];
+  if (demandasJson != null) {
+    try {
+      demandas = (jsonDecode(demandasJson) as List).map((e) => e.toString()).toList();
+    } catch (_) {}
+  }
+  if (!mounted) return;
+  setState(() {
+    _agentes = agentes;
+    _logradouros = logradouros;
+    _demandasDisponiveis = demandas;
+    _relacaoQuadras = quadras;
+    _resultadosQuadras = resultados;
+    if (_agenteSelecionado != null && !_agentes.contains(_agenteSelecionado)) {
+      _agenteSelecionado = null;
+    }
+  });
+}
 
 latlng.LatLng _melhorPontoDentroDaQuadra(
   List<Map<String, double>> pontos,
@@ -276,6 +307,50 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
           'CONTROLE DE ZOONOSES',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Dados e backup',
+            icon: const Icon(Icons.storage),
+            onSelected: (acao) async {
+              try {
+                if (acao == 'backup') {
+                  final json = await DatabaseHelper.instance.exportarBackupJson();
+                  final caminho = await FilePicker.platform.saveFile(
+                    dialogTitle: 'Salvar cópia de segurança',
+                    fileName: 'backup_controle_zoonoses.json',
+                    type: FileType.custom,
+                    allowedExtensions: ['json'],
+                    bytes: Uint8List.fromList(utf8.encode(json)),
+                  );
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(caminho == null ? 'Backup cancelado.' : 'Backup salvo com sucesso.'),
+                  ));
+                } else if (acao == 'restaurar') {
+                  final arquivo = await FilePicker.pickFile(
+                    type: FileType.custom,
+                    allowedExtensions: ['json'],
+                  );
+                  if (arquivo == null) return;
+                  final conteudo = utf8.decode(await arquivo.readAsBytes());
+                  await DatabaseHelper.instance.restaurarBackupJson(conteudo);
+                  await _carregarDadosPersistidos();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Backup restaurado. Os dados locais foram substituídos pelo conteúdo do backup.'),
+                  ));
+                }
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falha na operação de dados: $e')));
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'backup', child: Text('Fazer backup dos dados')),
+              PopupMenuItem(value: 'restaurar', child: Text('Restaurar backup JSON')),
+            ],
+          ),
+        ],
       ),
       body: SafeArea(
         child: Padding(
@@ -439,7 +514,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                             width: 105,
                             height: 52,
                             child: ElevatedButton(
-                              onPressed: () {
+                              onPressed: () async {
                                 if (_quadraSelecionada == null ||
                                     _areaSelecionada == null ||
                                     _scSelecionado == null ||
@@ -457,7 +532,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
 
                                 if (_operacaoSelecionada ==
                                     'Visita a Imóveis') {
-                                  Navigator.push(
+                                  await Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => TelaVisitaImoveis(
@@ -468,6 +543,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                       ),
                                     ),
                                   );
+                                  await _carregarDadosPersistidos();
                                 }
                               },
 
@@ -538,11 +614,34 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                     );
                                   }).toList();
 
+                                  final nomeQuadra = poligono['quadra'] as String;
+                                  final relacao = _buscarQuadra(nomeQuadra);
+                                  final areaMapa = relacao?['area'] ?? _areaSelecionada ?? '';
+                                  final scMapa = relacao?['sc'] ?? _scSelecionado ?? '';
+                                  final chaveResultado = '$areaMapa|$scMapa|$nomeQuadra';
+                                  final resultado = _resultadosQuadras[chaveResultado];
+                                  var corPreenchimento = Colors.transparent;
+                                  var corContorno = Colors.green;
+                                  if (_operacaoSelecionada == 'Visita a Imóveis') {
+                                    if (resultado?['larvas'] == true) {
+                                      corPreenchimento = Colors.red.withOpacity(0.38);
+                                      corContorno = Colors.red;
+                                    } else if (resultado?['concluida'] == true) {
+                                      corPreenchimento = Colors.green.withOpacity(0.32);
+                                      corContorno = Colors.green;
+                                    }
+                                  } else if (_operacaoSelecionada == 'Pendência' && resultado?['pendencia'] == true) {
+                                    corPreenchimento = Colors.orange.withOpacity(0.42);
+                                    corContorno = Colors.deepOrange;
+                                  } else if (_operacaoSelecionada == 'Demandas' && resultado?['demanda'] == true) {
+                                    corPreenchimento = Colors.blue.withOpacity(0.38);
+                                    corContorno = Colors.blue;
+                                  }
                                   return fmap.Polygon<String>(
                                     points: pontos,
-                                    hitValue: poligono['quadra'] as String,
-                                    color: Colors.transparent,
-                                    borderColor: Colors.green,
+                                    hitValue: nomeQuadra,
+                                    color: corPreenchimento,
+                                    borderColor: corContorno,
                                     borderStrokeWidth: 2,
                                   );
                                 }).toList(),
@@ -754,6 +853,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                     .where((linha) => linha.isNotEmpty)
                     .toList();
 
+                await DatabaseHelper.instance.substituirLista('agentes', 'nome', agentes);
                 setState(() {
                   _agentes = agentes;
                   _agenteSelecionado = null;
@@ -782,6 +882,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                     .where((linha) => linha.isNotEmpty)
                     .toList();
 
+                await DatabaseHelper.instance.substituirLista('logradouros', 'nome', logradouros);
                 setState(() {
                   _logradouros = logradouros;
                   _logradouroSelecionado = null;
@@ -789,6 +890,28 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
 
                 debugPrint('Arquivo de logradouros: ${arquivo.name}');
                 debugPrint('Logradouros encontrados: ${logradouros.length}');
+              }
+
+              // ======================================================
+              // DEMANDAS / RECLAMAÇÕES
+              // ======================================================
+            } else if (titulo == 'Demandas / Reclamações') {
+              final arquivo = await FilePicker.pickFile(
+                type: FileType.custom,
+                allowedExtensions: ['txt'],
+              );
+              if (arquivo != null) {
+                final conteudo = utf8.decode(await arquivo.readAsBytes());
+                final demandas = conteudo.split(RegExp(r'\r?\n'))
+                    .map((linha) => linha.trim())
+                    .where((linha) => linha.isNotEmpty).toSet().toList();
+                await DatabaseHelper.instance.salvarConfiguracao(
+                  'demandas_disponiveis', jsonEncode(demandas));
+                if (!mounted) return;
+                setState(() { _demandasDisponiveis = demandas; });
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('${demandas.length} demandas importadas e salvas.'),
+                ));
               }
 
               // ======================================================
@@ -932,6 +1055,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                 }
               }
 
+              await DatabaseHelper.instance.substituirQuadras(relacao);
               setState(() {
                 _relacaoQuadras = relacao;
               });
@@ -1240,10 +1364,99 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
   @override
   void initState() {
     super.initState();
+    _carregarImoveis();
+    debugPrint('TELA 2 - QUANTIDADE DE LOGRADOUROS: ${widget.logradouros.length}');
+  }
 
-    debugPrint(
-      'TELA 2 - QUANTIDADE DE LOGRADOUROS: ${widget.logradouros.length}',
+  String get _dataIso => '${_dataSelecionada.year.toString().padLeft(4, '0')}-'
+      '${_dataSelecionada.month.toString().padLeft(2, '0')}-'
+      '${_dataSelecionada.day.toString().padLeft(2, '0')}';
+
+  Future<void> _carregarImoveis() async {
+    final db = DatabaseHelper.instance;
+    final registros = await db.carregarImoveis(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
     );
+    final ruasSalvas = await db.carregarRuasDaQuadra(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
+    );
+    if (!mounted) return;
+    final porRua = <String, List<Map<String, String>>>{};
+    for (final rua in ruasSalvas) { porRua[rua] = <Map<String, String>>[]; }
+    for (final r in registros) {
+      porRua.putIfAbsent(r['rua'] ?? '', () => []).add({
+        'numero': r['numero'] ?? '', 'tipo': r['tipo'] ?? 'CS',
+        'status': r['status'] ?? '',
+      });
+    }
+    setState(() {
+      _enderecosAdicionados = porRua.entries.map((e) => <String, dynamic>{
+        'logradouro': e.key, 'imoveis': e.value,
+      }).toList();
+    });
+  }
+
+  Future<void> _salvarImovel(String rua, Map<String, String> imovel) async {
+    final numero = (imovel['numero'] ?? '').trim();
+    if (numero.isEmpty) return;
+    await DatabaseHelper.instance.salvarImovel(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra, rua: rua,
+      numero: numero, tipo: imovel['tipo'] ?? 'CS', status: imovel['status'] ?? '',
+      dataVisita: _dataIso,
+    );
+  }
+
+  Future<void> _salvarTipoImovel(String rua, Map<String, String> imovel) async {
+    final numero = (imovel['numero'] ?? '').trim();
+    if (numero.isEmpty) return;
+    await DatabaseHelper.instance.atualizarTipoImovel(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra, rua: rua,
+      numero: numero, tipo: imovel['tipo'] ?? 'CS',
+    );
+  }
+
+
+  Future<void> _pintarMapa() async {
+    try {
+      var quantidade = 0;
+      for (final endereco in _enderecosAdicionados) {
+        final rua = endereco['logradouro'] as String;
+        final imoveis = (endereco['imoveis'] as List).cast<Map<String, String>>();
+        for (final imovel in imoveis) {
+          final numero = (imovel['numero'] ?? '').trim();
+          if (numero.isEmpty) continue;
+          await DatabaseHelper.instance.salvarImovel(
+            area: widget.area, sc: widget.sc, quadra: widget.quadra, rua: rua,
+            numero: numero, tipo: imovel['tipo'] ?? 'CS',
+            status: imovel['status'] ?? '', dataVisita: _dataIso,
+          );
+          quantidade++;
+        }
+      }
+      if (quantidade == 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Cadastre pelo menos um imóvel antes de pintar a quadra.'),
+        ));
+        return;
+      }
+      final resultado = await DatabaseHelper.instance.finalizarVistoriaQuadra(
+        area: widget.area, sc: widget.sc, quadra: widget.quadra, dataVisita: _dataIso,
+      );
+      if (!mounted) return;
+      final mensagem = resultado['larvas'] == true
+          ? 'Dados salvos. Quadra marcada com larvas no mapa de visitas.'
+          : resultado['concluida'] == true
+              ? 'Dados salvos. Todos os imóveis estão trabalhados; quadra concluída.'
+              : 'Dados salvos. Pendências registradas; quadra marcada no mapa de pendências.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensagem)));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Não foi possível salvar a vistoria: $e'),
+      ));
+    }
   }
 
   
@@ -1355,6 +1568,10 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                               'imoveis': <Map<String, String>>[],
                             });
                           });
+                          await DatabaseHelper.instance.salvarRuaNaQuadra(
+                            area: widget.area, sc: widget.sc, quadra: widget.quadra,
+                            rua: _logradouroSelecionado!,
+                          );
 
                           debugPrint(
                             'ENDEREÇO ADICIONADO: $_logradouroSelecionado',
@@ -1477,6 +1694,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                         ),
                                         onChanged: (valor) {
                                           imovel['tipo'] = valor;
+                                          _salvarTipoImovel(endereco['logradouro'] as String, imovel);
                                         },
                                       ),
                                     ),
@@ -1487,6 +1705,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'T';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1506,6 +1725,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'F';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1525,6 +1745,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'D';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1544,6 +1765,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'TE';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1565,6 +1787,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'P';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1584,6 +1807,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                           setState(() {
                                             imovel['status'] = 'R';
                                           });
+                                          _salvarImovel(endereco['logradouro'] as String, imovel);
                                         },
                                         child: Center(
                                           child: Text(
@@ -1613,6 +1837,9 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                                     rua:
                                                         endereco['logradouro']!,
                                                     numero: imovel['numero']!,
+                                                    status: imovel['status'] ?? '',
+                                                    demandasDisponiveis: _demandasDisponiveis,
+                                                    dataVisita: _dataIso,
                                                   ),
                                             ),
                                           );
@@ -1664,6 +1891,8 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                         'novo': 'true',
                                       });
                                     });
+                                    final listaImoveis = (endereco['imoveis'] as List).cast<Map<String, String>>();
+                                    _salvarImovel(endereco['logradouro'] as String, listaImoveis.last);
                                     _numeroController.clear();
                                     _tipoController.text = 'CS';
                                     WidgetsBinding.instance
@@ -1706,7 +1935,38 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                   },
                 ),
               ),
+              const SizedBox(height: 8),
             ],
+          ),
+        ),
+      ),
+      // Mantém o comando visível mesmo quando o conteúdo da Tela 2 ocupa
+      // toda a altura disponível.
+      // Botão fixo e destacado na área inferior indicada pelo usuário.
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 76,
+            child: ElevatedButton.icon(
+              key: const ValueKey('botao_pintar_mapa_tela_2'),
+              onPressed: _pintarMapa,
+              icon: const Icon(Icons.map, size: 28),
+              label: const Text(
+                'PINTAR O MAPA',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF087A43),
+                foregroundColor: Colors.white,
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1746,6 +2006,9 @@ class TelaRecipientesDemandas extends StatefulWidget {
   final String quadra;
   final String rua;
   final String numero;
+  final String status;
+  final List<String> demandasDisponiveis;
+  final String dataVisita;
 
   const TelaRecipientesDemandas({
     super.key,
@@ -1754,6 +2017,9 @@ class TelaRecipientesDemandas extends StatefulWidget {
     required this.quadra,
     required this.rua,
     required this.numero,
+    required this.status,
+    required this.demandasDisponiveis,
+    required this.dataVisita,
   });
 
   @override
@@ -1763,6 +2029,8 @@ class TelaRecipientesDemandas extends StatefulWidget {
 
 class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
   List<Map<String, String>> _recipientes = [];
+  String? _demandaSelecionada;
+  final TextEditingController _orientacaoController = TextEditingController();
   final List<String> _medidasControle = [
     'Mecânico',
     'Prod. Alternativo',
@@ -1842,6 +2110,54 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
     ],
   };
 
+  @override
+  void initState() {
+    super.initState();
+    _carregarRecipientes();
+  }
+
+  @override
+  void dispose() {
+    _orientacaoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregarRecipientes() async {
+    final registros = await DatabaseHelper.instance.carregarRecipientes(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
+      rua: widget.rua, numero: widget.numero, dataVisita: widget.dataVisita,
+    );
+    final demanda = await DatabaseHelper.instance.carregarUltimaDemanda(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
+      rua: widget.rua, numero: widget.numero,
+    );
+    if (!mounted) return;
+    setState(() {
+      _recipientes = registros;
+      final texto = demanda?['demanda'];
+      _demandaSelecionada = texto != null && widget.demandasDisponiveis.contains(texto) ? texto : null;
+      _orientacaoController.text = demanda?['orientacao'] ?? '';
+    });
+  }
+
+  Future<void> _salvarDemanda() async {
+    if (widget.status != 'T') return;
+    if ((_demandaSelecionada ?? '').isEmpty && _orientacaoController.text.trim().isEmpty) return;
+    await DatabaseHelper.instance.salvarDemanda(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
+      rua: widget.rua, numero: widget.numero,
+      demanda: _demandaSelecionada ?? '', orientacao: _orientacaoController.text.trim(),
+    );
+  }
+
+  Future<void> _salvarRecipientes() async {
+    await DatabaseHelper.instance.salvarRecipientes(
+      area: widget.area, sc: widget.sc, quadra: widget.quadra,
+      rua: widget.rua, numero: widget.numero, dataVisita: widget.dataVisita,
+      recipientes: _recipientes,
+    );
+  }
+
   Widget _celulaCabecalho(String texto) {
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1896,7 +2212,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                 child: Text(medida),
               );
             }).toList(),
-            onChanged: (valor) {
+            onChanged: widget.status != 'T' ? null : (valor) {
               if (valor == null) return;
 
               setState(() {
@@ -1909,6 +2225,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                   'larva': '',
                 });
               });
+              _salvarRecipientes();
             },
           ),
         ),
@@ -1932,10 +2249,10 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
           children: [
             const Text(
               'TELA 3 - RECIPIENTES E DEMANDAS',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 6),
 
             Row(
               children: [
@@ -1951,7 +2268,13 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
               ],
             ),
 
-            const SizedBox(height: 20),
+            if (widget.status != 'T')
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('Consulta somente: para cadastrar ou editar, marque o imóvel como T (Trabalhado).',
+                  style: TextStyle(fontWeight: FontWeight.w600, color: Colors.deepOrange)),
+              ),
+            const SizedBox(height: 6),
 
             Expanded(
               child: Container(
@@ -2029,10 +2352,11 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                           child: Text(medida),
                                         );
                                       }).toList(),
-                                      onChanged: (valor) {
+                                      onChanged: widget.status != 'T' ? null : (valor) {
                                         setState(() {
                                           recipiente['medida'] = valor ?? '';
                                         });
+                                        _salvarRecipientes();
                                       },
                                     ),
                                   ),
@@ -2062,11 +2386,12 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                           ),
                                         );
                                       }).toList(),
-                                      onChanged: (valor) {
+                                      onChanged: widget.status != 'T' ? null : (valor) {
                                         setState(() {
                                           recipiente['grupo'] = valor ?? '';
                                           recipiente['tipo'] = '';
                                         });
+                                        _salvarRecipientes();
                                       },
                                     ),
                                   ),
@@ -2101,13 +2426,14 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                                 );
                                               })
                                               .toList(),
-                                      onChanged: recipiente['grupo']!.isEmpty
+                                      onChanged: widget.status != 'T' || recipiente['grupo']!.isEmpty
                                           ? null
                                           : (valor) {
                                               setState(() {
                                                 recipiente['tipo'] =
                                                     valor ?? '';
                                               });
+                                              _salvarRecipientes();
                                             },
                                     ),
                                   ),
@@ -2115,6 +2441,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                   Padding(
                                     padding: const EdgeInsets.all(4),
                                     child: TextFormField(
+                                      enabled: widget.status == 'T',
                                       initialValue: recipiente['existente'],
                                       keyboardType: TextInputType.number,
                                       inputFormatters: [
@@ -2131,6 +2458,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                       ),
                                       onChanged: (valor) {
                                         recipiente['existente'] = valor;
+                                        _salvarRecipientes();
                                       },
                                     ),
                                   ),
@@ -2138,6 +2466,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                   Padding(
                                     padding: const EdgeInsets.all(4),
                                     child: TextFormField(
+                                      enabled: widget.status == 'T',
                                       initialValue: recipiente['agua'],
                                       keyboardType: TextInputType.number,
                                       inputFormatters: [
@@ -2154,6 +2483,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                       ),
                                       onChanged: (valor) {
                                         recipiente['agua'] = valor;
+                                        _salvarRecipientes();
                                       },
                                     ),
                                   ),
@@ -2161,6 +2491,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                   Padding(
                                     padding: const EdgeInsets.all(4),
                                     child: TextFormField(
+                                      enabled: widget.status == 'T',
                                       initialValue: recipiente['larva'],
                                       keyboardType: TextInputType.number,
                                       inputFormatters: [
@@ -2177,6 +2508,7 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                                       ),
                                       onChanged: (valor) {
                                         recipiente['larva'] = valor;
+                                        _salvarRecipientes();
                                       },
                                     ),
                                   ),
@@ -2192,13 +2524,52 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
                 ),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<String>(
+                    value: _demandaSelecionada,
+                    onChanged: widget.status == 'T' ? (valor) async {
+                      setState(() { _demandaSelecionada = valor; });
+                      await _salvarDemanda();
+                    } : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Demanda / Reclamação',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: widget.demandasDisponiveis.map((item) => DropdownMenuItem<String>(
+                      value: item, child: Text(item, overflow: TextOverflow.ellipsis),
+                    )).toList(),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    enabled: widget.status == 'T',
+                    controller: _orientacaoController,
+                    maxLines: 2,
+                    onChanged: (_) => _salvarDemanda(),
+                    decoration: const InputDecoration(
+                      labelText: 'Orientação / observações',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
 
             SafeArea(
               child: Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await _salvarRecipientes();
+                    await _salvarDemanda();
+                    if (!context.mounted) return;
                     Navigator.pop(context);
                   },
                   child: const Text('OK'),
