@@ -20,11 +20,18 @@ jobs:
       - name: Criar estrutura Android
         run: flutter create --platforms=android .
 
+
       - name: Instalar dependências
         run: flutter pub get
 
+      - name: Preparar Android SDK e NDK
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager --install "ndk;28.2.13676358"
+
       - name: Gerar APK
         run: flutter build apk --release
+
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
