@@ -315,7 +315,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
               try {
                 if (acao == 'backup') {
                   final json = await DatabaseHelper.instance.exportarBackupJson();
-                  final caminho = await FilePicker.platform.saveFile(
+                  final caminho = await FilePicker.saveFile(
                     dialogTitle: 'Salvar cópia de segurança',
                     fileName: 'backup_controle_zoonoses.json',
                     type: FileType.custom,
