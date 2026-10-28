@@ -1339,6 +1339,7 @@ class TelaVisitaImoveis extends StatefulWidget {
   final String sc;
   final String quadra;
   final List<String> logradouros;
+  final List<String> demandasDisponiveis;
 
   const TelaVisitaImoveis({
     super.key,
