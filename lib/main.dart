@@ -599,8 +599,15 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                           ),
                          children: [
                             fmap.TileLayer(
-                              urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                            ),
+ 
+fmap.TileLayer(
+  urlTemplate:
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  errorTileCallback: (tile, error, stackTrace) {
+    debugPrint('ERRO AO CARREGAR IMAGEM DE SATÉLITE: $error');
+  },
+),
+
 
                             if (_poligonosKml.isNotEmpty)
                               fmap.PolygonLayer<String>(
