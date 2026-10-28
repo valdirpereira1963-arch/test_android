@@ -535,12 +535,15 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                   await Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) => TelaVisitaImoveis(
-                                        area: _areaSelecionada!,
-                                        sc: _scSelecionado!,
-                                        quadra: _quadraSelecionada!,
-                                        logradouros: _logradouros,
-                                      ),
+                                      
+  builder: (context) => TelaVisitaImoveis(
+  area: _areaSelecionada!,
+  sc: _scSelecionado!,
+  quadra: _quadraSelecionada!,
+  logradouros: _logradouros,
+  demandasDisponiveis: _demandasDisponiveis,
+),
+
                                     ),
                                   );
                                   await _carregarDadosPersistidos();
