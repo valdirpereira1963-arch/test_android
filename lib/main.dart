@@ -1337,6 +1337,7 @@ class MapaKmlPainter extends CustomPainter {
 }
 
 // Tela Visita Imoveis
+
 class TelaVisitaImoveis extends StatefulWidget {
   final String area;
   final String sc;
@@ -1350,11 +1351,13 @@ class TelaVisitaImoveis extends StatefulWidget {
     required this.sc,
     required this.quadra,
     required this.logradouros,
+    required this.demandasDisponiveis,
   });
 
   @override
   State<TelaVisitaImoveis> createState() => _TelaVisitaImoveisState();
 }
+
 
 class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
   DateTime _dataSelecionada = DateTime.now();
