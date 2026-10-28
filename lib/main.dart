@@ -625,15 +625,17 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                   final resultado = _resultadosQuadras[chaveResultado];
                                   var corPreenchimento = Colors.transparent;
                                   var corContorno = Colors.green;
-                                  if (_operacaoSelecionada == 'Visita a Imóveis') {
-                                    if (resultado?['larvas'] == true) {
-                                      corPreenchimento = Colors.red.withOpacity(0.38);
-                                      corContorno = Colors.red;
-                                    } else if (resultado?['concluida'] == true) {
-                                      corPreenchimento = Colors.green.withOpacity(0.32);
-                                      corContorno = Colors.green;
-                                    }
-                                  } else if (_operacaoSelecionada == 'Pendência' && resultado?['pendencia'] == true) {
+if (_operacaoSelecionada == 'Visita a Imóveis') {
+  if (resultado != null) {
+    if (resultado['larvas'] == true) {
+      corPreenchimento = Colors.red.withOpacity(0.38);
+      corContorno = Colors.red;
+    } else {
+      corPreenchimento = Colors.green.withOpacity(0.32);
+      corContorno = Colors.green;
+    }
+  }
+} else if (_operacaoSelecionada == 'Pendência' && resultado?['pendencia'] == true) {
                                     corPreenchimento = Colors.orange.withOpacity(0.42);
                                     corContorno = Colors.deepOrange;
                                   } else if (_operacaoSelecionada == 'Demandas' && resultado?['demanda'] == true) {
