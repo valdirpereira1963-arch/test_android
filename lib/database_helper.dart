@@ -233,7 +233,7 @@ class DatabaseHelper {
       final recipientes = await txn.rawQuery("""
         SELECT COUNT(*) AS total FROM recipientes
         WHERE area=? AND sc=? AND quadra=? AND data_visita=?
-          AND CAST(TRIM(larva) AS INTEGER) > 1
+          AND CAST(TRIM(larva) AS INTEGER) > 0
       """, [area, sc, quadra, dataVisita]);
       final temLarvas = ((recipientes.first['total'] as int?) ?? 0) > 0;
 
