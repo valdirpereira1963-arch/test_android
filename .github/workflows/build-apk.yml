@@ -20,6 +20,10 @@ jobs:
       - name: Criar estrutura Android
         run: flutter create --platforms=android .
 
+      - name: Verificar permissão de internet
+        run: |
+          grep -n "INTERNET" android/app/src/main/AndroidManifest.xml
+
       - name: Instalar dependências
         run: flutter pub get
 
