@@ -1553,7 +1553,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                     width: 110,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         if (_logradouroSelecionado == null) {
                           return;
                         }
