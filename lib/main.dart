@@ -1839,7 +1839,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                                         endereco['logradouro']!,
                                                     numero: imovel['numero']!,
                                                     status: imovel['status'] ?? '',
-                                                    demandasDisponiveis: _demandasDisponiveis,
+                                                    demandasDisponiveis: widget.demandasDisponiveis,
                                                     dataVisita: _dataIso,
                                                   ),
                                             ),
