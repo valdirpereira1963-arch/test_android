@@ -30,7 +30,7 @@ jobs:
           java-version: '17'
 
       - name: Preparar Android SDK e NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Aceitar licenças Android
         run: yes | flutter doctor --android-licenses
