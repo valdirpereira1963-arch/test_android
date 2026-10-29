@@ -2174,6 +2174,80 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
     );
   }
 
+    Widget _contadorStepper({
+    required Map<String, String> recipiente,
+    required String chave,
+    required bool habilitado,
+  }) {
+    final texto = (recipiente[chave] ?? '').trim();
+    final valor = int.tryParse(texto) ?? 0;
+
+    Future<void> alterar(int delta) async {
+      if (!habilitado) return;
+      final novoValor = (valor + delta).clamp(0, 999999);
+      setState(() {
+        recipiente[chave] = novoValor.toString();
+      });
+      await _salvarRecipientes();
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: habilitado ? Colors.grey : Colors.grey.shade400,
+              ),
+              borderRadius: BorderRadius.circular(4),
+              color: habilitado ? null : Colors.grey.shade100,
+            ),
+            child: Text(
+              texto.isEmpty ? '0' : texto,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                color: habilitado ? null : Colors.grey.shade600,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 2),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 28,
+              height: 25,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                tooltip: 'Aumentar',
+                iconSize: 18,
+                onPressed: habilitado ? () => alterar(1) : null,
+                icon: const Icon(Icons.add),
+              ),
+            ),
+            SizedBox(
+              width: 28,
+              height: 25,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                tooltip: 'Diminuir',
+                iconSize: 18,
+                onPressed: habilitado && valor > 0 ? () => alterar(-1) : null,
+                icon: const Icon(Icons.remove),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    }
+
+  
   Widget _celulaCabecalho(String texto) {
     return Container(
       padding: const EdgeInsets.all(8),
