@@ -2530,76 +2530,28 @@ class _TelaRecipientesDemandasState extends State<TelaRecipientesDemandas> {
 
                                   Padding(
                                     padding: const EdgeInsets.all(4),
-                                    child: TextFormField(
-                                      enabled: widget.status == 'T',
-                                      initialValue: recipiente['existente'],
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
-                                      textAlign: TextAlign.center,
-                                      decoration: const InputDecoration(
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 8,
-                                        ),
-                                        hintText: '0',
-                                      ),
-                                      onChanged: (valor) {
-                                        recipiente['existente'] = valor;
-                                        _salvarRecipientes();
-                                      },
+                                    child: _contadorStepper(
+                                      recipiente: recipiente,
+                                      chave: 'existente',
+                                      habilitado: widget.status == 'T',
                                     ),
                                   ),
 
                                   Padding(
                                     padding: const EdgeInsets.all(4),
-                                    child: TextFormField(
-                                      enabled: widget.status == 'T',
-                                      initialValue: recipiente['agua'],
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
-                                      textAlign: TextAlign.center,
-                                      decoration: const InputDecoration(
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 8,
-                                        ),
-                                        hintText: '0',
-                                      ),
-                                      onChanged: (valor) {
-                                        recipiente['agua'] = valor;
-                                        _salvarRecipientes();
-                                      },
+                                    child: _contadorStepper(
+                                      recipiente: recipiente,
+                                      chave: 'agua',
+                                      habilitado: widget.status == 'T',
                                     ),
                                   ),
 
                                   Padding(
                                     padding: const EdgeInsets.all(4),
-                                    child: TextFormField(
-                                      enabled: widget.status == 'T',
-                                      initialValue: recipiente['larva'],
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
-                                      textAlign: TextAlign.center,
-                                      decoration: const InputDecoration(
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 8,
-                                        ),
-                                        hintText: '0',
-                                      ),
-                                      onChanged: (valor) {
-                                        recipiente['larva'] = valor;
-                                        _salvarRecipientes();
-                                      },
+                                    child: _contadorStepper(
+                                      recipiente: recipiente,
+                                      chave: 'larva',
+                                      habilitado: widget.status == 'T',
                                     ),
                                   ),
                                 ],
