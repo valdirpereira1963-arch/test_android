@@ -127,6 +127,43 @@ void initState() {
   });
 }
 
+Future<void> _abrirRelatorioPendencia(Map<String, String> registro) async {
+  final area = registro['area'];
+  final sc = registro['sc'];
+  final quadra = registro['quadra'];
+  if (area == null || sc == null || quadra == null) return;
+
+  // Confirma que a quadra ainda possui pendências no resultado do ciclo atual.
+  final dataVisita = await DatabaseHelper.instance.carregarDataResultadoQuadra(
+    area: area, sc: sc, quadra: quadra,
+  );
+  if (!mounted) return;
+  if (dataVisita == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Não há pendências abertas para esta quadra.'),
+    ));
+    await _carregarDadosPersistidos();
+    return;
+  }
+
+  final resultado = await Navigator.push<bool>(
+    context,
+    MaterialPageRoute(
+      builder: (context) => TelaVisitaImoveis(
+        area: area,
+        sc: sc,
+        quadra: quadra,
+        logradouros: _logradouros,
+        demandasDisponiveis: _demandasDisponiveis,
+        modoPendencia: true,
+      ),
+    ),
+  );
+  if (resultado == true) {
+    await _carregarDadosPersistidos();
+  }
+}
+
 
 Future<void> _carregarDadosPersistidos() async {
   final db = DatabaseHelper.instance;
