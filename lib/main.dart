@@ -1778,7 +1778,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                   ),
                                 ),
                               ),
-                              if (!widget.modoPendencia) Expanded(child: Center(child: Text('T'))),
+                              Expanded(child: Center(child: Text('T'))),
                               Expanded(child: Center(child: Text('F'))),
                               Expanded(child: Center(child: Text('D'))),
                               Expanded(child: Center(child: Text('TE'))),
@@ -1830,7 +1830,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                         },
                                       ),
                                     ),
-                                    if (!widget.modoPendencia) Expanded(
+                                    Expanded(
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.opaque,
                                         onTap: () {
