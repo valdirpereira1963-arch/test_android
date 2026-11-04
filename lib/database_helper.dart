@@ -257,6 +257,38 @@ class DatabaseHelper {
     });
   }
 
+  Future<String?> carregarDataResultadoQuadra({
+    required String area, required String sc, required String quadra,
+  }) async {
+    final db = await database;
+    final rows = await db.query('resultados_quadras',
+      columns: ['data_visita'],
+      where: 'area=? AND sc=? AND quadra=? AND pendencia=1',
+      whereArgs: [area, sc, quadra], limit: 1);
+    return rows.isEmpty ? null : rows.first['data_visita'] as String?;
+  }
+
+  Future<void> finalizarPendenciaQuadra({
+    required String area, required String sc, required String quadra,
+    required String dataVisita,
+    required List<Map<String, String>> pendencias,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+      for (final item in pendencias) {
+        batch.update('pendencias_imoveis', {'status': item['status'] ?? ''},
+          where: 'area=? AND sc=? AND quadra=? AND rua=? AND numero=? AND data_visita=?',
+          whereArgs: [area, sc, quadra, item['rua'], item['numero'], dataVisita]);
+      }
+      await batch.commit(noResult: true);
+      // Preserva os registros históricos; apenas retira a indicação visual da pendência.
+      await txn.update('resultados_quadras', {'pendencia': 0},
+        where: 'area=? AND sc=? AND quadra=? AND data_visita=?',
+        whereArgs: [area, sc, quadra, dataVisita]);
+    });
+  }
+
   Future<List<Map<String, String>>> carregarPendenciasQuadra({
     required String area,
     required String sc,

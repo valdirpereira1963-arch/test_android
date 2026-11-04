@@ -55,6 +55,7 @@ class _TelaAberturaState extends State<TelaAbertura> {
   String? _scSelecionado;
   String? _quadraSelecionada;
   String? _operacaoSelecionada;
+  bool _abrindoPendencia = false;
 
   final fmap.LayerHitNotifier<String> _quadraHitNotifier =
     ValueNotifier<fmap.LayerHitResult<String>?>(null);
@@ -111,6 +112,12 @@ void initState() {
           'S.C.: ${registro['sc']} | '
           'ÁREA: ${registro['area']}',
         );
+        if (_operacaoSelecionada == 'Pendência' && !_abrindoPendencia) {
+          _abrindoPendencia = true;
+          _abrirRelatorioPendencia(registro).whenComplete(() {
+            _abrindoPendencia = false;
+          });
+        }
       } else {
         debugPrint(
           'QUADRA $quadra NÃO ENCONTRADA NA TABELA',
@@ -530,7 +537,13 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                   'QUADRA=$_quadraSelecionada',
                                 );
 
-                                if (_operacaoSelecionada ==
+                                if (_operacaoSelecionada == 'Pendência') {
+                                  await _abrirRelatorioPendencia({
+                                    'area': _areaSelecionada!,
+                                    'sc': _scSelecionado!,
+                                    'quadra': _quadraSelecionada!,
+                                  });
+                                } else if (_operacaoSelecionada ==
                                     'Visita a Imóveis') {
                                   await Navigator.push(
                                     context,
@@ -1353,6 +1366,7 @@ class TelaVisitaImoveis extends StatefulWidget {
   final String quadra;
   final List<String> logradouros;
   final List<String> demandasDisponiveis;
+  final bool modoPendencia;
 
   const TelaVisitaImoveis({
     super.key,
@@ -1361,6 +1375,7 @@ class TelaVisitaImoveis extends StatefulWidget {
     required this.quadra,
     required this.logradouros,
     required this.demandasDisponiveis,
+    this.modoPendencia = false,
   });
 
   @override
@@ -1390,6 +1405,35 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
 
   Future<void> _carregarImoveis() async {
     final db = DatabaseHelper.instance;
+    if (widget.modoPendencia) {
+      final dataCiclo = await db.carregarDataResultadoQuadra(
+        area: widget.area, sc: widget.sc, quadra: widget.quadra,
+      );
+      if (dataCiclo == null) return;
+      final partes = dataCiclo.split('-');
+      if (partes.length == 3) {
+        _dataSelecionada = DateTime(
+          int.parse(partes[0]), int.parse(partes[1]), int.parse(partes[2]));
+      }
+      final pendencias = await db.carregarPendenciasQuadra(
+        area: widget.area, sc: widget.sc, quadra: widget.quadra,
+        dataVisita: dataCiclo,
+      );
+      if (!mounted) return;
+      final porRua = <String, List<Map<String, String>>>{};
+      for (final r in pendencias) {
+        porRua.putIfAbsent(r['rua'] ?? '', () => []).add({
+          'numero': r['numero'] ?? '', 'tipo': 'CS',
+          'status': r['status'] ?? '',
+        });
+      }
+      setState(() {
+        _enderecosAdicionados = porRua.entries.map((e) => <String, dynamic>{
+          'logradouro': e.key, 'imoveis': e.value,
+        }).toList();
+      });
+      return;
+    }
     final registros = await db.carregarImoveis(
       area: widget.area, sc: widget.sc, quadra: widget.quadra,
     );
@@ -1475,14 +1519,49 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
     }
   }
 
-  
+
+  Future<void> _finalizarPendencia() async {
+    try {
+      for (final endereco in _enderecosAdicionados) {
+        final rua = endereco['logradouro'] as String;
+        final imoveis = (endereco['imoveis'] as List).cast<Map<String, String>>();
+        for (final imovel in imoveis) {
+          await DatabaseHelper.instance.salvarImovel(
+            area: widget.area, sc: widget.sc, quadra: widget.quadra,
+            rua: rua, numero: imovel['numero'] ?? '', tipo: imovel['tipo'] ?? 'CS',
+            status: imovel['status'] ?? '', dataVisita: _dataIso,
+          );
+        }
+      }
+      await DatabaseHelper.instance.finalizarPendenciaQuadra(
+        area: widget.area, sc: widget.sc, quadra: widget.quadra,
+        dataVisita: _dataIso,
+        pendencias: _enderecosAdicionados.expand((e) =>
+          (e['imoveis'] as List<Map<String, String>>).map((imovel) => {
+            'rua': e['logradouro'] as String,
+            'numero': imovel['numero'] ?? '',
+            'status': imovel['status'] ?? '',
+          })).toList(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Pendência finalizada. A quadra foi retirada do mapa de pendências.'),
+      ));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Não foi possível finalizar a pendência: $e'),
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'CONTROLE DE ZOONOSES',
+        title: Text(
+          widget.modoPendencia ? 'RELATÓRIO DE PENDÊNCIAS' : 'CONTROLE DE ZOONOSES',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
@@ -1515,7 +1594,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                         border: OutlineInputBorder(),
                         suffixIcon: Icon(Icons.calendar_month),
                       ),
-                      onTap: () async {
+                      onTap: widget.modoPendencia ? null : () async {
                         final dataEscolhida = await showDatePicker(
                           context: context,
                           initialDate: _dataSelecionada,
@@ -1542,7 +1621,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
 
               const SizedBox(height: 15),
 
-              Row(
+              if (!widget.modoPendencia) Row(
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
@@ -1662,7 +1741,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                   ),
                                 ),
                               ),
-                              Expanded(child: Center(child: Text('T'))),
+                              if (!widget.modoPendencia) Expanded(child: Center(child: Text('T'))),
                               Expanded(child: Center(child: Text('F'))),
                               Expanded(child: Center(child: Text('D'))),
                               Expanded(child: Center(child: Text('TE'))),
@@ -1714,7 +1793,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                                         },
                                       ),
                                     ),
-                                    Expanded(
+                                    if (!widget.modoPendencia) Expanded(
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.opaque,
                                         onTap: () {
@@ -1877,7 +1956,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                               .toList()),
 
                           // CAMPO PARA NOVO IMÓVEL
-                          Row(
+                          if (!widget.modoPendencia) Row(
                             children: [
                               Expanded(
                                 flex: 3,
@@ -1967,11 +2046,11 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
             width: double.infinity,
             height: 76,
             child: ElevatedButton.icon(
-              key: const ValueKey('botao_pintar_mapa_tela_2'),
-              onPressed: _pintarMapa,
-              icon: const Icon(Icons.map, size: 28),
-              label: const Text(
-                'PINTAR O MAPA',
+              key: ValueKey(widget.modoPendencia ? 'botao_finalizar_pendencia' : 'botao_pintar_mapa_tela_2'),
+              onPressed: widget.modoPendencia ? _finalizarPendencia : _pintarMapa,
+              icon: Icon(widget.modoPendencia ? Icons.check_circle : Icons.map, size: 28),
+              label: Text(
+                widget.modoPendencia ? 'FINALIZAR PENDÊNCIA' : 'PINTAR O MAPA',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
               ),
               style: ElevatedButton.styleFrom(
