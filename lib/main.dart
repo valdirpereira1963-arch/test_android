@@ -46,6 +46,7 @@ class _TelaAberturaState extends State<TelaAbertura> {
   String? _agenteSelecionado;
   List<String> _logradouros = [];
   List<String> _demandasDisponiveis = [];
+  List<String> _quadrasADL = [];
   String? _logradouroSelecionado;
   List<String> _quadrasKml = [];
   List<Map<String, String>> _relacaoQuadras = [];
@@ -55,7 +56,6 @@ class _TelaAberturaState extends State<TelaAbertura> {
   String? _scSelecionado;
   String? _quadraSelecionada;
   String? _operacaoSelecionada;
-  bool _abrindoPendencia = false;
 
   final fmap.LayerHitNotifier<String> _quadraHitNotifier =
     ValueNotifier<fmap.LayerHitResult<String>?>(null);
@@ -112,12 +112,6 @@ void initState() {
           'S.C.: ${registro['sc']} | '
           'ÁREA: ${registro['area']}',
         );
-        if (_operacaoSelecionada == 'Pendência' && !_abrindoPendencia) {
-          _abrindoPendencia = true;
-          _abrirRelatorioPendencia(registro).whenComplete(() {
-            _abrindoPendencia = false;
-          });
-        }
       } else {
         debugPrint(
           'QUADRA $quadra NÃO ENCONTRADA NA TABELA',
@@ -127,43 +121,6 @@ void initState() {
   });
 }
 
-Future<void> _abrirRelatorioPendencia(Map<String, String> registro) async {
-  final area = registro['area'];
-  final sc = registro['sc'];
-  final quadra = registro['quadra'];
-  if (area == null || sc == null || quadra == null) return;
-
-  // Confirma que a quadra ainda possui pendências no resultado do ciclo atual.
-  final dataVisita = await DatabaseHelper.instance.carregarDataResultadoQuadra(
-    area: area, sc: sc, quadra: quadra,
-  );
-  if (!mounted) return;
-  if (dataVisita == null) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Não há pendências abertas para esta quadra.'),
-    ));
-    await _carregarDadosPersistidos();
-    return;
-  }
-
-  final resultado = await Navigator.push<bool>(
-    context,
-    MaterialPageRoute(
-      builder: (context) => TelaVisitaImoveis(
-        area: area,
-        sc: sc,
-        quadra: quadra,
-        logradouros: _logradouros,
-        demandasDisponiveis: _demandasDisponiveis,
-        modoPendencia: true,
-      ),
-    ),
-  );
-  if (resultado == true) {
-    await _carregarDadosPersistidos();
-  }
-}
-
 
 Future<void> _carregarDadosPersistidos() async {
   final db = DatabaseHelper.instance;
@@ -171,16 +128,28 @@ Future<void> _carregarDadosPersistidos() async {
   final logradouros = await db.carregarLista('logradouros');
   final quadras = await db.carregarQuadras();
   final demandasJson = await db.carregarConfiguracao('demandas_disponiveis');
+  final adlJson = await db.carregarConfiguracao('adl_quadras');
   final resultados = await db.carregarResultadosQuadras();
   List<String> demandas = [];
+  List<String> quadrasADL = [];
   if (demandasJson != null) {
     try {
       demandas = (jsonDecode(demandasJson) as List).map((e) => e.toString()).toList();
     } catch (_) {}
   }
+  if (adlJson != null) {
+    try {
+      quadrasADL = (jsonDecode(adlJson) as List)
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
+    } catch (_) {}
+  }
   if (!mounted) return;
   setState(() {
     _agentes = agentes;
+    _quadrasADL = quadrasADL;
     _logradouros = logradouros;
     _demandasDisponiveis = demandas;
     _relacaoQuadras = quadras;
@@ -574,13 +543,7 @@ latlng.LatLng _melhorPontoDentroDaQuadra(
                                   'QUADRA=$_quadraSelecionada',
                                 );
 
-                                if (_operacaoSelecionada == 'Pendência') {
-                                  await _abrirRelatorioPendencia({
-                                    'area': _areaSelecionada!,
-                                    'sc': _scSelecionado!,
-                                    'quadra': _quadraSelecionada!,
-                                  });
-                                } else if (_operacaoSelecionada ==
+                                if (_operacaoSelecionada ==
                                     'Visita a Imóveis') {
                                   await Navigator.push(
                                     context,
@@ -692,6 +655,16 @@ if (_operacaoSelecionada == 'Visita a Imóveis') {
       corContorno = Colors.green;
     }
   }
+} else if (_operacaoSelecionada == 'ADL' &&
+    _quadrasADL.any((q) {
+      final numeroMapa = int.tryParse(nomeQuadra.trim());
+      final numeroADL = int.tryParse(q.trim());
+      return numeroMapa != null && numeroADL != null
+          ? numeroMapa == numeroADL
+          : q.trim().toLowerCase() == nomeQuadra.trim().toLowerCase();
+    })) {
+  corPreenchimento = Colors.blue.withOpacity(0.42);
+  corContorno = Colors.blue;
 } else if (_operacaoSelecionada == 'Pendência' && resultado?['pendencia'] == true) {
                                     corPreenchimento = Colors.orange.withOpacity(0.42);
                                     corContorno = Colors.deepOrange;
@@ -953,6 +926,62 @@ if (_operacaoSelecionada == 'Visita a Imóveis') {
                 debugPrint('Arquivo de logradouros: ${arquivo.name}');
                 debugPrint('Logradouros encontrados: ${logradouros.length}');
               }
+
+              // ======================================================
+              // DEMANDAS / RECLAMAÇÕES
+              // ======================================================
+            } else if (titulo == 'ADL') {
+              // Importa somente a relação de quadras do ADL.
+              // Não altera o KML, imóveis, visitas ou demais dados cadastrados.
+              final arquivos = await FilePicker.pickFiles(
+                type: FileType.custom,
+                allowedExtensions: ['txt'],
+              );
+
+              if (arquivos.isEmpty) return;
+
+              final arquivo = arquivos.first;
+              final conteudo = utf8.decode(
+                await arquivo.readAsBytes(),
+                allowMalformed: true,
+              ).replaceFirst('\uFEFF', '');
+
+              final quadrasADL = RegExp(r'\d+')
+                  .allMatches(conteudo)
+                  .map((match) => match.group(0)!)
+                  .toSet()
+                  .toList();
+
+              if (quadrasADL.isEmpty) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Nenhum número de quadra foi encontrado no arquivo ADL.'),
+                  ),
+                );
+                return;
+              }
+
+              await DatabaseHelper.instance.salvarConfiguracao(
+                'adl_quadras',
+                jsonEncode(quadrasADL),
+              );
+
+              if (!mounted) return;
+              setState(() {
+                _quadrasADL = quadrasADL;
+              });
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    '${quadrasADL.length} quadras ADL importadas e salvas. '
+                    'Selecione ADL em OPERAÇÃO para visualizá-las em azul.',
+                  ),
+                ),
+              );
+              debugPrint('Arquivo ADL: ${arquivo.name}');
+              debugPrint('Quadras ADL importadas: ${quadrasADL.join(', ')}');
 
               // ======================================================
               // DEMANDAS / RECLAMAÇÕES
@@ -1403,7 +1432,6 @@ class TelaVisitaImoveis extends StatefulWidget {
   final String quadra;
   final List<String> logradouros;
   final List<String> demandasDisponiveis;
-  final bool modoPendencia;
 
   const TelaVisitaImoveis({
     super.key,
@@ -1412,7 +1440,6 @@ class TelaVisitaImoveis extends StatefulWidget {
     required this.quadra,
     required this.logradouros,
     required this.demandasDisponiveis,
-    this.modoPendencia = false,
   });
 
   @override
@@ -1442,35 +1469,6 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
 
   Future<void> _carregarImoveis() async {
     final db = DatabaseHelper.instance;
-    if (widget.modoPendencia) {
-      final dataCiclo = await db.carregarDataResultadoQuadra(
-        area: widget.area, sc: widget.sc, quadra: widget.quadra,
-      );
-      if (dataCiclo == null) return;
-      final partes = dataCiclo.split('-');
-      if (partes.length == 3) {
-        _dataSelecionada = DateTime(
-          int.parse(partes[0]), int.parse(partes[1]), int.parse(partes[2]));
-      }
-      final pendencias = await db.carregarPendenciasQuadra(
-        area: widget.area, sc: widget.sc, quadra: widget.quadra,
-        dataVisita: dataCiclo,
-      );
-      if (!mounted) return;
-      final porRua = <String, List<Map<String, String>>>{};
-      for (final r in pendencias) {
-        porRua.putIfAbsent(r['rua'] ?? '', () => []).add({
-          'numero': r['numero'] ?? '', 'tipo': 'CS',
-          'status': r['status'] ?? '',
-        });
-      }
-      setState(() {
-        _enderecosAdicionados = porRua.entries.map((e) => <String, dynamic>{
-          'logradouro': e.key, 'imoveis': e.value,
-        }).toList();
-      });
-      return;
-    }
     final registros = await db.carregarImoveis(
       area: widget.area, sc: widget.sc, quadra: widget.quadra,
     );
@@ -1556,49 +1554,14 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
     }
   }
 
-
-  Future<void> _finalizarPendencia() async {
-    try {
-      for (final endereco in _enderecosAdicionados) {
-        final rua = endereco['logradouro'] as String;
-        final imoveis = (endereco['imoveis'] as List).cast<Map<String, String>>();
-        for (final imovel in imoveis) {
-          await DatabaseHelper.instance.salvarImovel(
-            area: widget.area, sc: widget.sc, quadra: widget.quadra,
-            rua: rua, numero: imovel['numero'] ?? '', tipo: imovel['tipo'] ?? 'CS',
-            status: imovel['status'] ?? '', dataVisita: _dataIso,
-          );
-        }
-      }
-      await DatabaseHelper.instance.finalizarPendenciaQuadra(
-        area: widget.area, sc: widget.sc, quadra: widget.quadra,
-        dataVisita: _dataIso,
-        pendencias: _enderecosAdicionados.expand((e) =>
-          (e['imoveis'] as List<Map<String, String>>).map((imovel) => {
-            'rua': e['logradouro'] as String,
-            'numero': imovel['numero'] ?? '',
-            'status': imovel['status'] ?? '',
-          })).toList(),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Pendência finalizada. A quadra foi retirada do mapa de pendências.'),
-      ));
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Não foi possível finalizar a pendência: $e'),
-      ));
-    }
-  }
+  
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.modoPendencia ? 'RELATÓRIO DE PENDÊNCIAS' : 'CONTROLE DE ZOONOSES',
+        title: const Text(
+          'CONTROLE DE ZOONOSES',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
@@ -1631,7 +1594,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                         border: OutlineInputBorder(),
                         suffixIcon: Icon(Icons.calendar_month),
                       ),
-                      onTap: widget.modoPendencia ? null : () async {
+                      onTap: () async {
                         final dataEscolhida = await showDatePicker(
                           context: context,
                           initialDate: _dataSelecionada,
@@ -1658,7 +1621,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
 
               const SizedBox(height: 15),
 
-              if (!widget.modoPendencia) Row(
+              Row(
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
@@ -1993,7 +1956,7 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
                               .toList()),
 
                           // CAMPO PARA NOVO IMÓVEL
-                          if (!widget.modoPendencia) Row(
+                          Row(
                             children: [
                               Expanded(
                                 flex: 3,
@@ -2083,11 +2046,11 @@ class _TelaVisitaImoveisState extends State<TelaVisitaImoveis> {
             width: double.infinity,
             height: 76,
             child: ElevatedButton.icon(
-              key: ValueKey(widget.modoPendencia ? 'botao_finalizar_pendencia' : 'botao_pintar_mapa_tela_2'),
-              onPressed: widget.modoPendencia ? _finalizarPendencia : _pintarMapa,
-              icon: Icon(widget.modoPendencia ? Icons.check_circle : Icons.map, size: 28),
-              label: Text(
-                widget.modoPendencia ? 'FINALIZAR PENDÊNCIA' : 'PINTAR O MAPA',
+              key: const ValueKey('botao_pintar_mapa_tela_2'),
+              onPressed: _pintarMapa,
+              icon: const Icon(Icons.map, size: 28),
+              label: const Text(
+                'PINTAR O MAPA',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
               ),
               style: ElevatedButton.styleFrom(
